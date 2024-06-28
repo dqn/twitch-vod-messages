@@ -2,6 +2,12 @@
 
 Fetch Twitch VOD messages.
 
+## Installation
+
+```sh
+npm install twitch-vod-messages
+```
+
 ## Usage
 
 ```ts
@@ -26,3 +32,7 @@ while (true) {
   }
 }
 ```
+
+## License
+
+MIT
