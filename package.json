@@ -1,19 +1,40 @@
 {
   "name": "twitch-vod-messages",
-  "type": "module",
   "version": "0.1.0",
+  "description": "Fetch Twitch VOD messages.",
+  "type": "module",
+  "keywords": [
+    "twitch"
+  ],
+  "author": "dqn",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dqn/twitch-vod-messages"
+  },
+  "homepage": "https://github.com/dqn/twitch-vod-messages#readme",
+  "bugs": {
+    "url": "https://github.com/dqn/twitch-vod-messages/issues"
+  },
   "scripts": {
-    "build": "tsdown ./src"
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "test": "vitest",
+    "lint": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepublishOnly": "pnpm run lint && pnpm run test && pnpm run build"
   },
   "devDependencies": {
-    "prettier": "^3.3.2",
-    "tsdown": "^0.16.6"
+    "prettier": "^3.6.2",
+    "tsdown": "^0.16.6",
+    "vitest": "^4.0.13"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "zod": "^3.23.8"
+    "zod": "^3.25.76"
   },
   "files": [
     "dist",
@@ -23,12 +44,17 @@
   ],
   "exports": {
     ".": {
-      "require": "./dist/index.cjs",
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
   "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts"
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.cts"
 }

@@ -1,15 +1,35 @@
 import type { z } from "zod";
 import { schema } from "./schema";
+import {
+  ClientIdRetrievalError,
+  HttpError,
+  ResponseParseError,
+} from "./errors";
 
-async function retrieveClientId(videoId: string) {
-  const res = await fetch(`https://www.twitch.tv/videos/${videoId}`);
+/**
+ * Retrieve Client ID from Twitch VOD page HTML
+ * @param videoId - Twitch VOD ID
+ * @returns Client ID string
+ * @throws {HttpError} When HTTP request fails
+ * @throws {ClientIdRetrievalError} When Client ID retrieval fails
+ */
+async function retrieveClientId(videoId: string): Promise<string> {
+  const url = `https://www.twitch.tv/videos/${videoId}`;
+  const res = await fetch(url);
+
+  if (!res.ok) {
+    throw new HttpError(res.status, url);
+  }
+
   const html = await res.text();
 
   const search = 'clientId="';
   const searchIndex = html.indexOf(search);
 
   if (searchIndex === -1) {
-    throw new Error("failed to find client id");
+    throw new ClientIdRetrievalError(
+      `Failed to find client ID in HTML for video ${videoId}`,
+    );
   }
 
   const startIndex = searchIndex + search.length;
@@ -19,6 +39,12 @@ async function retrieveClientId(videoId: string) {
   return clientId;
 }
 
+/**
+ * Create request payload for Twitch GraphQL API
+ * @param videoId - Twitch VOD ID
+ * @param contentOffsetSeconds - Content offset in seconds
+ * @returns GraphQL request payload
+ */
 function createPayload(videoId: string, contentOffsetSeconds: number) {
   return [
     {
@@ -38,16 +64,31 @@ function createPayload(videoId: string, contentOffsetSeconds: number) {
   ];
 }
 
+/**
+ * VOD comment node type
+ */
 export type Node = NonNullable<
   z.infer<typeof schema>["0"]["data"]["video"]["comments"]
 >["edges"][number]["node"];
 
+/**
+ * Return type of fetchNext
+ */
 export type FetchResult = {
   nodes: Node[];
   hasNextPage: boolean;
 };
 
+/**
+ * Twitch VOD comment fetching client
+ */
 export type TwitchClient = {
+  /**
+   * Fetch the next page of comments
+   * @returns Array of comment nodes and pagination info
+   * @throws {HttpError} When GraphQL API request fails
+   * @throws {ResponseParseError} When response parsing fails
+   */
   fetchNext: () => Promise<FetchResult>;
 };
 
@@ -70,7 +111,8 @@ export async function createTwitchClient(
         };
       }
 
-      const res = await fetch("https://gql.twitch.tv/gql", {
+      const endpointUrl = "https://gql.twitch.tv/gql";
+      const res = await fetch(endpointUrl, {
         method: "POST",
         headers: {
           "client-id": clientId,
@@ -78,16 +120,26 @@ export async function createTwitchClient(
         body: JSON.stringify(createPayload(videoId, offset)),
       });
 
+      if (!res.ok) {
+        throw new HttpError(res.status, endpointUrl);
+      }
+
       const json = await res.json();
       const result = schema.safeParse(json);
 
       if (!result.success) {
-        // console.error(result.error.errors);
-        // console.log(JSON.stringify(json));
-        throw new Error("failed to parse response");
+        throw new ResponseParseError(
+          "Failed to parse GraphQL response",
+          result.error.errors,
+        );
       }
 
-      const comments = result.data[0]?.data.video.comments;
+      const firstResult = result.data[0];
+      if (firstResult === undefined) {
+        throw new ResponseParseError("GraphQL response array is empty");
+      }
+
+      const comments = firstResult.data.video.comments;
 
       if (comments == null) {
         hasNextPage = false;

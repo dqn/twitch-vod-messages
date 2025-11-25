@@ -10,6 +10,8 @@ npm install twitch-vod-messages
 
 ## Usage
 
+### Basic Example
+
 ```ts
 import { createTwitchClient } from "twitch-vod-messages";
 
@@ -31,6 +33,13 @@ while (true) {
     break;
   }
 }
+```
+
+### With Offset
+
+```ts
+// Specify start offset in seconds
+const client = await createTwitchClient("0123456789", 300); // Start from 5 minutes
 ```
 
 ## License
