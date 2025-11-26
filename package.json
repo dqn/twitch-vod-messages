@@ -19,7 +19,8 @@
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
-    "test": "vitest",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -28,6 +29,7 @@
   "devDependencies": {
     "prettier": "^3.6.2",
     "tsdown": "^0.16.6",
+    "tsx": "^4.20.6",
     "vitest": "^4.0.13"
   },
   "peerDependencies": {

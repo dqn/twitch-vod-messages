@@ -10,36 +10,39 @@ npm install twitch-vod-messages
 
 ## Usage
 
-### Basic Example
+### Fetch All Messages
+
+Efficiently fetch all messages from a video using parallel requests:
 
 ```ts
-import { createTwitchClient } from "twitch-vod-messages";
+import { fetchAllMessages } from "twitch-vod-messages";
 
 const videoId = "0123456789";
-const client = await createTwitchClient(videoId);
+const messages = await fetchAllMessages(videoId);
 
-while (true) {
-  const res = await client.fetchNext();
-
-  for (const node of res.nodes) {
-    console.log(
-      node.contentOffsetSeconds,
-      node.commenter?.displayName ?? "Anonymous",
-      node.message.fragments.map((f) => f.text).join(""),
-    );
-  }
-
-  if (!res.hasNextPage) {
-    break;
-  }
+for (const node of messages) {
+  console.log(
+    node.contentOffsetSeconds,
+    node.commenter?.displayName ?? "Anonymous",
+    node.message.fragments.map((f) => f.text).join(""),
+  );
 }
 ```
 
-### With Offset
+### With Options
+
+You can specify the concurrency level and progress callback:
 
 ```ts
-// Specify start offset in seconds
-const client = await createTwitchClient("0123456789", 300); // Start from 5 minutes
+const messages = await fetchAllMessages(videoId, {
+  concurrency: 10, // Default: 5
+  onProgress: (progress) => {
+    console.log(`Progress: ${progress.percentage}%`);
+    console.log(
+      `Completed: ${progress.completedChunks}/${progress.totalChunks}`,
+    );
+  },
+});
 ```
 
 ## License
