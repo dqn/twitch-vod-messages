@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+/**
+ * Response schema for VideoCommentsByOffsetOrCursor query
+ */
 export const schema = z.array(
   z.object({
     data: z.object({
