@@ -290,3 +290,82 @@ export async function fetchAllMessages(
     (a, b) => a.contentOffsetSeconds - b.contentOffsetSeconds,
   );
 }
+
+/**
+ * Result type for fetchMessages
+ */
+export type FetchMessagesResult = {
+  /**
+   * Array of comment nodes
+   */
+  nodes: Node[];
+};
+
+/**
+ * Options for fetchMessages
+ */
+export type FetchMessagesOptions = {
+  /**
+   * Content offset in seconds
+   */
+  contentOffsetSeconds?: number;
+};
+
+/**
+ * Fetch messages from a video with content offset
+ * @param videoId - Twitch VOD ID
+ * @param options - Fetch options
+ * @returns Result with nodes
+ * @throws {HttpError} When HTTP request fails
+ * @throws {ResponseParseError} When response parsing fails
+ * @throws {ClientIdRetrievalError} When Client ID retrieval fails
+ */
+export async function fetchMessages(
+  videoId: string,
+  options?: FetchMessagesOptions,
+): Promise<FetchMessagesResult> {
+  const clientId = await retrieveClientId(videoId);
+  const contentOffsetSeconds = options?.contentOffsetSeconds ?? 0;
+
+  const endpointUrl = "https://gql.twitch.tv/gql";
+  const res = await fetch(endpointUrl, {
+    method: "POST",
+    headers: {
+      "client-id": clientId,
+    },
+    body: JSON.stringify(createPayload(videoId, contentOffsetSeconds)),
+  });
+
+  if (!res.ok) {
+    throw new HttpError(res.status, endpointUrl);
+  }
+
+  const json = await res.json();
+  const result = schema.safeParse(json);
+
+  if (!result.success) {
+    throw new ResponseParseError(
+      "Failed to parse GraphQL response",
+      result.error.errors,
+    );
+  }
+
+  const firstResult = result.data[0];
+  if (firstResult === undefined) {
+    throw new ResponseParseError("GraphQL response array is empty");
+  }
+
+  const comments = firstResult.data.video.comments;
+
+  if (comments == null) {
+    return {
+      nodes: [],
+    };
+  }
+
+  const nodes = comments.edges.map((x) => x.node);
+
+  return {
+    nodes,
+  };
+}
