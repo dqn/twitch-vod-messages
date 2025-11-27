@@ -72,41 +72,84 @@ export type Node = NonNullable<
 >["edges"][number]["node"];
 
 /**
- * Parse ISO 8601 duration string (e.g. PT1H2M3S)
- * @param duration - Duration string
- * @returns Duration in seconds
- */
-function parseDuration(duration: string): number {
-  const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-  if (!match) return 0;
-  const hours = parseInt(match[1] || "0", 10);
-  const minutes = parseInt(match[2] || "0", 10);
-  const seconds = parseInt(match[3] || "0", 10);
-  return hours * 3600 + minutes * 60 + seconds;
-}
-
-/**
- * Retrieve video length in seconds
+ * Probe video length by sampling offsets
  * @param videoId - Twitch VOD ID
- * @returns Video length in seconds
+ * @param clientId - Twitch Client ID
+ * @param probeInterval - Interval between probes in seconds
+ * @returns Estimated video length in seconds
  * @throws {HttpError} When HTTP request fails
+ * @throws {ResponseParseError} When response parsing fails
  */
-async function retrieveVideoLength(videoId: string): Promise<number> {
-  const url = `https://www.twitch.tv/videos/${videoId}`;
-  const res = await fetch(url);
-
-  if (!res.ok) {
-    throw new HttpError(res.status, url);
+async function probeVideoLength(
+  videoId: string,
+  clientId: string,
+  probeInterval: number = 3600,
+): Promise<number> {
+  const probeOffsets = [0];
+  // Probe every hour for the first 5 hours
+  for (let i = 1; i <= 5; i++) {
+    probeOffsets.push(i * probeInterval);
+  }
+  // Probe every 4 hours up to 48 hours
+  for (let i = 8; i <= 48; i += 4) {
+    probeOffsets.push(i * probeInterval);
   }
 
-  const html = await res.text();
-  const match = html.match(/"duration":"(PT.*?)"/);
+  const endpointUrl = "https://gql.twitch.tv/gql";
+  const probeResults = await Promise.all(
+    probeOffsets.map(async (offset) => {
+      const res = await fetch(endpointUrl, {
+        method: "POST",
+        headers: {
+          "client-id": clientId,
+        },
+        body: JSON.stringify(createPayload(videoId, offset)),
+      });
 
-  if (!match || !match[1]) {
-    return 0;
+      if (!res.ok) {
+        throw new HttpError(res.status, endpointUrl);
+      }
+
+      const json = await res.json();
+      const result = schema.safeParse(json);
+
+      if (!result.success) {
+        throw new ResponseParseError(
+          "Failed to parse GraphQL response",
+          result.error.errors,
+        );
+      }
+
+      const firstResult = result.data[0];
+      if (firstResult === undefined) {
+        throw new ResponseParseError("GraphQL response array is empty");
+      }
+
+      const comments = firstResult.data.video.comments;
+
+      return {
+        offset,
+        hasNextPage: comments?.pageInfo?.hasNextPage ?? false,
+        maxOffsetSeconds:
+          comments?.edges?.at(-1)?.node?.contentOffsetSeconds ?? offset,
+      };
+    }),
+  );
+
+  // Find the first probe where hasNextPage is false
+  const endProbe = probeResults.find((r) => !r.hasNextPage);
+  if (endProbe) {
+    return endProbe.maxOffsetSeconds;
   }
 
-  return parseDuration(match[1]);
+  // If all probes have hasNextPage = true, estimate as double the last offset
+  const lastProbe = probeResults[probeResults.length - 1];
+  if (lastProbe) {
+    return lastProbe.maxOffsetSeconds * 2;
+  }
+
+  // Fallback to 0 if no results
+  return 0;
 }
 
 /**
@@ -211,13 +254,19 @@ export type FetchAllMessagesProgress = {
 export type FetchAllMessagesOptions = {
   /**
    * Number of parallel requests
-   * @default 5
+   * @default 128
    */
   concurrency?: number;
   /**
    * Progress callback
    */
   onProgress?: (progress: FetchAllMessagesProgress) => void;
+  /**
+   * Video length in seconds (optional).
+   * If provided, skips the probe phase for better performance.
+   * If not provided, will be estimated automatically.
+   */
+  lengthSeconds?: number;
 };
 
 /**
@@ -233,12 +282,15 @@ export async function fetchAllMessages(
   videoId: string,
   options?: FetchAllMessagesOptions,
 ): Promise<Node[]> {
-  const concurrency = options?.concurrency ?? 5;
+  const concurrency = options?.concurrency ?? 128;
   const onProgress = options?.onProgress;
 
-  // 1. Retrieve Client ID and video length
+  // 1. Retrieve Client ID
   const clientId = await retrieveClientId(videoId);
-  const lengthSeconds = await retrieveVideoLength(videoId);
+
+  // 2. Get or estimate video length
+  const lengthSeconds =
+    options?.lengthSeconds ?? (await probeVideoLength(videoId, clientId));
 
   if (lengthSeconds === 0) {
     return fetchMessagesFromOffset(videoId, clientId, 0);

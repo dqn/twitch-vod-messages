@@ -10,6 +10,54 @@ npm install twitch-vod-messages
 
 ## Usage
 
+### Fetch All Messages
+
+Efficiently fetch all messages from a video using parallel requests:
+
+```ts
+import { fetchAllMessages } from "twitch-vod-messages";
+
+const videoId = "0123456789";
+const messages = await fetchAllMessages(videoId);
+
+for (const node of messages) {
+  console.log(
+    node.contentOffsetSeconds,
+    node.commenter?.displayName ?? "Anonymous",
+    node.message.fragments.map((f) => f.text).join(""),
+  );
+}
+```
+
+`fetchAllMessages` automatically detects the video length by probing the video at multiple offsets. This works for videos up to 48 hours (the maximum duration of a Twitch VOD).
+
+### With Options
+
+You can specify the concurrency level and progress callback:
+
+```ts
+const messages = await fetchAllMessages(videoId, {
+  concurrency: 10, // Default: 128
+  onProgress: (progress) => {
+    console.log(`Progress: ${progress.percentage}%`);
+    console.log(
+      `Completed: ${progress.completedChunks}/${progress.totalChunks}`,
+    );
+  },
+});
+```
+
+### Manual Video Length
+
+For longer videos (>5 hours) or to skip the probe phase for better performance, you can manually specify the video length:
+
+```ts
+const messages = await fetchAllMessages(videoId, {
+  lengthSeconds: 36000, // 10 hours
+  concurrency: 10,
+});
+```
+
 ### Fetch Messages by Offset
 
 Fetch messages starting from a specific offset:
@@ -40,41 +88,6 @@ while (true) {
     contentOffsetSeconds = lastNode.contentOffsetSeconds + 1;
   }
 }
-```
-
-### Fetch All Messages
-
-Efficiently fetch all messages from a video using parallel requests:
-
-```ts
-import { fetchAllMessages } from "twitch-vod-messages";
-
-const videoId = "0123456789";
-const messages = await fetchAllMessages(videoId);
-
-for (const node of messages) {
-  console.log(
-    node.contentOffsetSeconds,
-    node.commenter?.displayName ?? "Anonymous",
-    node.message.fragments.map((f) => f.text).join(""),
-  );
-}
-```
-
-### With Options
-
-You can specify the concurrency level and progress callback:
-
-```ts
-const messages = await fetchAllMessages(videoId, {
-  concurrency: 10, // Default: 5
-  onProgress: (progress) => {
-    console.log(`Progress: ${progress.percentage}%`);
-    console.log(
-      `Completed: ${progress.completedChunks}/${progress.totalChunks}`,
-    );
-  },
-});
 ```
 
 ## License

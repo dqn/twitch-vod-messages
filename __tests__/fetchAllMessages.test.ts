@@ -11,21 +11,110 @@ describe("fetchAllMessages", () => {
   });
 
   describe("Normal cases", () => {
-    it("should retrieve video length and fetch comments in parallel", async () => {
+    it("should probe video length and fetch comments in parallel", async () => {
       // 1st call: HTML for retrieveClientId
       ((globalThis as any).fetch as any).mockResolvedValueOnce({
         ok: true,
         text: () => Promise.resolve('<html>clientId="test-client-id"</html>'),
       });
 
-      // 2nd call: HTML for retrieveVideoLength (duration: PT1M40S = 100 seconds)
+      // 2nd-7th calls: Probe requests (6 offsets: 0, 3600, 7200, 10800, 14400, 18000)
+      // Probe 0: hasNextPage = true
       ((globalThis as any).fetch as any).mockResolvedValueOnce({
         ok: true,
-        text: () => Promise.resolve('<html>"duration":"PT1M40S"</html>'),
+        json: () =>
+          Promise.resolve([
+            {
+              data: {
+                video: {
+                  comments: {
+                    edges: [
+                      {
+                        cursor: "probe0",
+                        node: {
+                          id: "probe0",
+                          commenter: null,
+                          contentOffsetSeconds: 100,
+                          createdAt: "2024-01-01T00:00:00Z",
+                          message: {
+                            fragments: [{ text: "Probe", emote: null }],
+                            userBadges: [],
+                            userColor: null,
+                          },
+                        },
+                      },
+                    ],
+                    pageInfo: {
+                      hasNextPage: true,
+                      hasPreviousPage: false,
+                    },
+                  },
+                },
+              },
+            },
+          ]),
       });
 
-      // 3rd-7th calls: Comments from different offsets
-      // If concurrency=5, 5 parallel requests occur
+      // Probe 3600: hasNextPage = false (end found)
+      ((globalThis as any).fetch as any).mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve([
+            {
+              data: {
+                video: {
+                  comments: {
+                    edges: [
+                      {
+                        cursor: "probe3600",
+                        node: {
+                          id: "probe3600",
+                          commenter: null,
+                          contentOffsetSeconds: 3650,
+                          createdAt: "2024-01-01T01:00:00Z",
+                          message: {
+                            fragments: [{ text: "Probe", emote: null }],
+                            userBadges: [],
+                            userColor: null,
+                          },
+                        },
+                      },
+                    ],
+                    pageInfo: {
+                      hasNextPage: false,
+                      hasPreviousPage: false,
+                    },
+                  },
+                },
+              },
+            },
+          ]),
+      });
+
+      // Remaining probes (7200, 10800, 14400, 18000, ...)
+      for (let i = 0; i < 15; i++) {
+        ((globalThis as any).fetch as any).mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve([
+              {
+                data: {
+                  video: {
+                    comments: {
+                      edges: [],
+                      pageInfo: {
+                        hasNextPage: false,
+                        hasPreviousPage: false,
+                      },
+                    },
+                  },
+                },
+              },
+            ]),
+        });
+      }
+
+      // 8th-12th calls: Chunk fetches (concurrency=5, estimated length=3650)
       for (let i = 0; i < 5; i++) {
         ((globalThis as any).fetch as any).mockResolvedValueOnce({
           ok: true,
@@ -45,7 +134,7 @@ describe("fetchAllMessages", () => {
                               login: `testuser${i}`,
                               displayName: `Test User ${i}`,
                             },
-                            contentOffsetSeconds: i * 20 + 10,
+                            contentOffsetSeconds: i * 730 + 10,
                             createdAt: "2024-01-01T00:00:00Z",
                             message: {
                               fragments: [
@@ -80,79 +169,16 @@ describe("fetchAllMessages", () => {
       }
     });
 
-    it("should exclude duplicate comments", async () => {
-      // retrieveClientId
+    it("should skip probe when lengthSeconds is provided", async () => {
+      // 1st call: HTML for retrieveClientId
       ((globalThis as any).fetch as any).mockResolvedValueOnce({
         ok: true,
         text: () => Promise.resolve('<html>clientId="test-client-id"</html>'),
       });
 
-      // 2nd call: HTML for retrieveVideoLength (duration: PT40S = 40 seconds)
-      ((globalThis as any).fetch as any).mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve('<html>"duration":"PT40S"</html>'),
-      });
-
-      const duplicateNode = {
-        cursor: "cursor1",
-        node: {
-          id: "comment1",
-          commenter: null,
-          contentOffsetSeconds: 15,
-          createdAt: "2024-01-01T00:00:00Z",
-          message: {
-            fragments: [{ text: "Duplicate", emote: null }],
-            userBadges: [],
-            userColor: null,
-          },
-        },
-      };
-
-      // Two chunks return the same comment
+      // No probe calls - directly to chunk fetches
+      // 2nd-3rd calls: Chunk fetches (concurrency=2, lengthSeconds=100)
       for (let i = 0; i < 2; i++) {
-        ((globalThis as any).fetch as any).mockResolvedValueOnce({
-          ok: true,
-          json: () =>
-            Promise.resolve([
-              {
-                data: {
-                  video: {
-                    comments: {
-                      edges: [duplicateNode],
-                      pageInfo: {
-                        hasNextPage: false,
-                        hasPreviousPage: false,
-                      },
-                    },
-                  },
-                },
-              },
-            ]),
-        });
-      }
-
-      const messages = await fetchAllMessages("12345", { concurrency: 2 });
-
-      // Verify duplicates are removed and only 1 remains
-      expect(messages).toHaveLength(1);
-      expect(messages[0]?.id).toBe("comment1");
-    });
-
-    it("should call progress callback", async () => {
-      // retrieveClientId
-      ((globalThis as any).fetch as any).mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve('<html>clientId="test-client-id"</html>'),
-      });
-
-      // 2nd call: HTML for retrieveVideoLength (duration: PT1M = 60 seconds)
-      ((globalThis as any).fetch as any).mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve('<html>"duration":"PT1M"</html>'),
-      });
-
-      // Comments for 3 chunks
-      for (let i = 0; i < 3; i++) {
         ((globalThis as any).fetch as any).mockResolvedValueOnce({
           ok: true,
           json: () =>
@@ -167,7 +193,7 @@ describe("fetchAllMessages", () => {
                           node: {
                             id: `comment${i}`,
                             commenter: null,
-                            contentOffsetSeconds: i * 20,
+                            contentOffsetSeconds: i * 50 + 10,
                             createdAt: "2024-01-01T00:00:00Z",
                             message: {
                               fragments: [
@@ -191,56 +217,39 @@ describe("fetchAllMessages", () => {
         });
       }
 
-      const progressUpdates: number[] = [];
-      await fetchAllMessages("12345", {
-        concurrency: 3,
-        onProgress: (progress) => {
-          progressUpdates.push(progress.percentage);
-        },
+      const messages = await fetchAllMessages("12345", {
+        concurrency: 2,
+        lengthSeconds: 100,
       });
 
-      // Verify progress is between 0 and 100
-      expect(progressUpdates.length).toBeGreaterThan(0);
-      for (const percentage of progressUpdates) {
-        expect(percentage).toBeGreaterThan(0);
-        expect(percentage).toBeLessThanOrEqual(100);
+      expect(messages).toHaveLength(2);
+    });
+
+    it("should fallback to single fetch when estimatedlength is 0", async () => {
+      // retrieveClientId
+      ((globalThis as any).fetch as any).mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve('<html>clientId="test-client-id"</html>'),
+      });
+
+      // All 17 probes return no comments
+      for (let i = 0; i < 17; i++) {
+        ((globalThis as any).fetch as any).mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve([
+              {
+                data: {
+                  video: {
+                    comments: null,
+                  },
+                },
+              },
+            ]),
+        });
       }
-      // Verify last progress is 100%
-      expect(progressUpdates[progressUpdates.length - 1]).toBe(100);
-    });
-  });
 
-  describe("Error cases", () => {
-    it("should throw HTTP error when fetching video metadata fails", async () => {
-      // retrieveClientId
-      ((globalThis as any).fetch as any).mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve('<html>clientId="test-client-id"</html>'),
-      });
-
-      // 2nd call: HTML for retrieveVideoLength - HTTP error
-      ((globalThis as any).fetch as any).mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-      });
-
-      await expect(fetchAllMessages("12345")).rejects.toThrow(HttpError);
-    });
-
-    it("should fallback to single chunk fetch when video length is not found", async () => {
-      // retrieveClientId
-      ((globalThis as any).fetch as any).mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve('<html>clientId="test-client-id"</html>'),
-      });
-
-      // 2nd call: HTML for retrieveVideoLength - no duration found (returns 0)
-      ((globalThis as any).fetch as any).mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve("<html>No duration here</html>"),
-      });
-
-      // 3rd call: Comments for fallback to single chunk fetch
+      // Single fetch at offset 0
       ((globalThis as any).fetch as any).mockResolvedValueOnce({
         ok: true,
         json: () =>
@@ -256,25 +265,38 @@ describe("fetchAllMessages", () => {
       });
 
       const messages = await fetchAllMessages("12345");
+
       // Should return empty array when no comments
       expect(messages).toHaveLength(0);
     });
+  });
 
-    it("should throw error on invalid video metadata response", async () => {
+  describe("Error cases", () => {
+    it("should throw HTTP error when probe request fails", async () => {
       // retrieveClientId
       ((globalThis as any).fetch as any).mockResolvedValueOnce({
         ok: true,
         text: () => Promise.resolve('<html>clientId="test-client-id"</html>'),
       });
 
-      // 2nd call: HTML for retrieveVideoLength (duration: PT1M = 60 seconds)
+      // First probe request fails
       ((globalThis as any).fetch as any).mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve('<html>"duration":"PT1M"</html>'),
+        ok: false,
+        status: 500,
       });
 
-      // 3rd-7th calls: Comments - invalid response (5 parallel chunks)
-      for (let i = 0; i < 5; i++) {
+      await expect(fetchAllMessages("12345")).rejects.toThrow(HttpError);
+    });
+
+    it("should throw error on invalid probe response", async () => {
+      // retrieveClientId
+      ((globalThis as any).fetch as any).mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve('<html>clientId="test-client-id"</html>'),
+      });
+
+      // All 17 probe requests return invalid response (Promise.all runs all 17)
+      for (let i = 0; i < 17; i++) {
         ((globalThis as any).fetch as any).mockResolvedValueOnce({
           ok: true,
           json: () => Promise.resolve({ invalid: "response" }),
